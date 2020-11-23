@@ -1,6 +1,10 @@
 package us.abstracta.jmeter.javadsl.core.listeners;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.DirectoryNotEmptyException;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
 import org.apache.jmeter.JMeter;
 import org.apache.jmeter.report.config.ConfigurationException;
 import org.apache.jmeter.report.dashboard.GenerationException;
@@ -12,21 +16,28 @@ import org.apache.jmeter.testelement.TestElement;
 import org.apache.jmeter.util.JMeterUtils;
 import org.apache.jmeter.visualizers.SimpleDataWriter;
 import us.abstracta.jmeter.javadsl.core.BaseTestElement;
-import us.abstracta.jmeter.javadsl.core.DslSampler.SamplerChild;
-import us.abstracta.jmeter.javadsl.core.DslTestPlan.TestPlanChild;
-import us.abstracta.jmeter.javadsl.core.DslThreadGroup.ThreadGroupChild;
+import us.abstracta.jmeter.javadsl.core.MultiScopedTestElement;
 
 /**
  * Generates a nice HTML report at the end of test plan execution.
  */
-public class HtmlReporter extends BaseTestElement implements TestPlanChild, ThreadGroupChild,
-    SamplerChild {
+public class HtmlReporter extends BaseTestElement implements MultiScopedTestElement {
 
   private final File reportDirectory;
 
-  public HtmlReporter(String reportDirectory) {
+  public HtmlReporter(String reportPath) throws IOException {
     super("Simple Data Writer", SimpleDataWriter.class);
-    this.reportDirectory = new File(reportDirectory);
+    reportDirectory = new File(reportPath);
+    if (reportDirectory.isFile()) {
+      throw new FileAlreadyExistsException(reportPath);
+    }
+    if (reportDirectory.isDirectory() && !isEmptyDirectory(reportDirectory)) {
+      throw new DirectoryNotEmptyException(reportPath);
+    }
+  }
+
+  private boolean isEmptyDirectory(File reportDirectory) throws IOException {
+    return !Files.newDirectoryStream(reportDirectory.toPath()).iterator().hasNext();
   }
 
   @Override

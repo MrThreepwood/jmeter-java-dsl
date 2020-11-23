@@ -1,12 +1,12 @@
 package us.abstracta.jmeter.javadsl.core.listeners;
 
+import java.io.File;
+import java.nio.file.FileAlreadyExistsException;
 import org.apache.jmeter.reporters.ResultCollector;
 import org.apache.jmeter.testelement.TestElement;
 import org.apache.jmeter.visualizers.SimpleDataWriter;
 import us.abstracta.jmeter.javadsl.core.BaseTestElement;
-import us.abstracta.jmeter.javadsl.core.DslSampler.SamplerChild;
-import us.abstracta.jmeter.javadsl.core.DslTestPlan.TestPlanChild;
-import us.abstracta.jmeter.javadsl.core.DslThreadGroup.ThreadGroupChild;
+import us.abstracta.jmeter.javadsl.core.MultiScopedTestElement;
 
 /**
  * Allows to generate a result log file (JTL) with data for each sample for a test plan, thread
@@ -23,14 +23,16 @@ import us.abstracta.jmeter.javadsl.core.DslThreadGroup.ThreadGroupChild;
  * See <a href="http://jmeter.apache.org/usermanual/listeners.html">JMeter listeners doc</a> for
  * more details on JTL format and settings.
  */
-public class JtlWriter extends BaseTestElement implements TestPlanChild, ThreadGroupChild,
-    SamplerChild {
+public class JtlWriter extends BaseTestElement implements MultiScopedTestElement {
 
   private final String jtlFile;
 
-  public JtlWriter(String jtlFile) {
+  public JtlWriter(String jtlFile) throws FileAlreadyExistsException {
     super("Simple Data Writer", SimpleDataWriter.class);
     this.jtlFile = jtlFile;
+    if (new File(jtlFile).exists()) {
+      throw new FileAlreadyExistsException(jtlFile);
+    }
   }
 
   @Override

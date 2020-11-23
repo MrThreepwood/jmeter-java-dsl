@@ -74,9 +74,7 @@ public class SaveTestPlanAsJMX {
     testPlan(
       threadGroup(2, 10,
         httpSampler("http://my.service")
-      ),
-      //this is just to log details of each request stats
-      jtlWriter("test.jtl")
+      )
     ).saveAsJmx("dsl-test-plan.jmx");
   }
   
@@ -198,6 +196,7 @@ import static us.abstracta.jmeter.javadsl.JmeterDsl.*;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import us.abstracta.jmeter.javadsl.core.TestPlanStats;
 
@@ -209,13 +208,15 @@ public class PerformanceTest {
       threadGroup(2, 10,
         httpSampler("http://my.service")
       ),
-      htmlReporter("html-report")
+      htmlReporter("html-report-" + Instant.now())
     ).run();
     assertThat(stats.overall().elapsedTimePercentile99()).isLessThan(Duration.ofSeconds(5));
   }
   
 }
 ```
+
+> **Note:** htmlReporter will throw an exception if provided directory path is a non empty directory or file
 
 ## Change sample result statuses with custom logic
 
@@ -250,6 +251,20 @@ public class PerformanceTest {
 }
 ```
 
+You can also use a Java lambda instead of providing Groovy script, which benefits from Java type safety & IDEs code auto completion:
+
+```java
+jsr223PostProcessor(s -> { 
+  if ("429".equals(s.prev.getResponseCode())) { 
+    s.prev.setSuccessful(true); 
+  } 
+})
+```
+
+> **WARNING:** using this last approach is currently only supported when using embedded JMeter engine (no support for saving to JMX and running it in JMeter GUI, or running it with BlazeMeter).
+
+Check [DslJsr223PostProcessor](../jmeter-java-dsl/src/main/java/us/abstracta/jmeter/javadsl/core/postprocessors/DslJsr223PostProcessor.java) for more details and additional options.
+
 JSR223PostProcessor is a very powerful tool, but is not the only, nor the best, alternative for many cases where JMeter already provides a better and simpler alternative (eg: asserting response bodies contain some string). Currently, jmeter-java-dsl does not support all the features JMeter provides. So, if you need something already provided by JMeter, please create an issue in GitHub requesting such a feature or submit a pull request with the required support.
    
 ## Provide Request Parameters Programmatically per Request
@@ -257,37 +272,87 @@ JSR223PostProcessor is a very powerful tool, but is not the only, nor the best, 
 With the standard DSL you can provide static values to request parameters, such as a body. However, you may also want to be able to modify your requests for each call. This is common in cases where your request creates something that must have unique values.
 
 ```java
-package us.abstracta.jmeter.javadsl.core;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static us.abstracta.jmeter.javadsl.JmeterDsl.*;
 
 import java.io.IOException;
 import java.time.Duration;
+import org.apache.jmeter.threads.JMeterVariables;
+import org.eclipse.jetty.http.MimeTypes.Type;
 import org.junit.jupiter.api.Test;
-import us.abstracta.jmeter.javadsl.core.TestPlanStats;
 
 public class PerformanceTest {
-  Int count = 0;
 
   @Test
-  public void testPerformance() {
+  public void testPerformance() throws IOException {
     TestPlanStats stats = testPlan(
-      threadGroup(2, 10,
-        httpSampler("http://my.service")
-          .post("${REQUEST_BODY}", contentType)
-          .children(
-            jsr223PreProcessor("us.abstracta.jmeter.javadsl.core.PerformanceTest.staticFunctionToCall(vars)")
-          )
-      )
+        threadGroup(2, 10,
+            httpSampler("http://my.service")
+                .post("${REQUEST_BODY}", Type.TEXT_PLAIN)
+                .children(
+                    jsr223PreProcessor(
+                        "vars.put('REQUEST_BODY', " + getClass().getName()
+                            + ".buildRequestBody(vars))")
+                )
+        )
     ).run();
     assertThat(stats.overall().elapsedTimePercentile99()).isLessThan(Duration.ofSeconds(5));
   }
-  
-  public static void staticFunctionToCall(JMeterVariables vars) {
-    count++;
-    String body = someFunctionToComposeRequestBodyFromCount(count);    
-    vars.put("REQUEST_BODY", body);
+
+  public static String buildRequestBody(JMeterVariables vars) {
+    String countVarName = "REQUEST_COUNT";
+    Integer countVar = (Integer) vars.getObject(countVarName);
+    int count = countVar != null ? countVar + 1 : 1;
+    vars.putObject(countVarName, count);
+    return "MyBody" + count;
   }
+
 }
 ```
+
+You can also use a Java lambda instead of providing Groovy script, which benefits from Java type safety & IDEs code auto completion:
+
+```java
+jsr223PreProcessor(s -> s.vars.put("REQUEST_BODY", buildRequestBody(s.vars)))
+```
+
+> **WARNING:** using this last approach is currently only supported when using embedded JMeter engine (no support for saving to JMX and running it in JMeter GUI, or running it with BlazeMeter).
+
+Check [DslJsr223PreProcessor](../jmeter-java-dsl/src/main/java/us/abstracta/jmeter/javadsl/core/preprocessors/DslJsr223PreProcessor.java) for more details and additional options.
+
+## Use part of a response in a following request
+
+It is a usual requirement while creating a test plan for an application, to be able to use part of a response (e.g.: a generated ID, token, etc) in a subsequent request. This can be easily achieved using JMeter extractors and variables. Here is an example with jmeter-java-dsl:
+
+```java
+import static org.assertj.core.api.Assertions.assertThat;
+import static us.abstracta.jmeter.javadsl.JmeterDsl.*;
+
+import java.io.IOException;
+import java.time.Duration;
+import org.eclipse.jetty.http.MimeTypes.Type;
+import org.junit.jupiter.api.Test;
+
+public class PerformanceTest {
+
+  @Test
+  public void testPerformance() throws IOException {
+    TestPlanStats stats = testPlan(
+        threadGroup(2, 10,
+            httpSampler("http://my.service/accounts")
+                .post("{\"name\": \"John Doe\"}", Type.APPLICATION_JSON)
+                .children(
+                    regexExtractor("ACCOUNT_ID", "\"id\":\"([^\"]+)\"")
+                ),
+            httpSampler("http://my.service/accounts/${ACCOUNT_ID}")
+        )
+    ).run();
+    assertThat(stats.overall().elapsedTimePercentile99()).isLessThan(Duration.ofSeconds(5));
+  }
+
+}
+```
+
+Check [DslRegexExtractor](../jmeter-java-dsl/src/main/java/us/abstracta/jmeter/javadsl/core/postprocessors/DslRegexExtractor.java) for more details and additional options.
+
+For more complex scenarios you can use [previously mentioned JSR223 Post processor](#change-sample-result-statuses-with-custom-logic).
