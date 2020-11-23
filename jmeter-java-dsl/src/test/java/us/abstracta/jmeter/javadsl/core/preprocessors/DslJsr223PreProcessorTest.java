@@ -3,9 +3,7 @@ package us.abstracta.jmeter.javadsl.core.preprocessors;
 import static com.github.tomakehurst.wiremock.client.WireMock.anyUrl;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
-import static us.abstracta.jmeter.javadsl.JmeterDsl.jsr223PreProcessor;
-import static us.abstracta.jmeter.javadsl.JmeterDsl.testPlan;
-import static us.abstracta.jmeter.javadsl.JmeterDsl.threadGroup;
+import static us.abstracta.jmeter.javadsl.JmeterDsl.*;
 
 import org.eclipse.jetty.http.MimeTypes;
 import org.junit.jupiter.api.Test;
@@ -55,5 +53,30 @@ public class DslJsr223PreProcessorTest extends JmeterDslTest {
         .withRequestBody(equalTo(REQUEST_BODY)));
   }
 
+  public static int count = 1;
+
+    @Test
+    //Testing body and header together to make sure they play nicely.
+    public void shouldUseBodyAndHeaderGeneratedFunctionalRequest()
+            throws Exception {
+        testPlan(
+                threadGroup(1, 2,
+                        JmeterDsl.
+                                httpSampler(wiremockUri)
+                                .header("Header1", s -> "Value" + count)
+                                .header("Header2", s -> "Value" + count)
+                                .post(s -> "Body" + count, MimeTypes.Type.TEXT_PLAIN)
+                        .children(jsr223PostProcessor(s -> count++))
+                )
+        ).run();
+        wiremockServer.verify(postRequestedFor(anyUrl())
+                .withHeader("Header1", equalTo("Value1"))
+                .withHeader("Header2", equalTo("Value1"))
+                .withRequestBody(equalTo("Body1")));
+        wiremockServer.verify(postRequestedFor(anyUrl())
+                .withHeader("Header1", equalTo("Value2"))
+                .withHeader("Header2", equalTo("Value2"))
+                .withRequestBody(equalTo("Body2")));
+    }
 
 }
